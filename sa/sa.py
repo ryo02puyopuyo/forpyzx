@@ -87,7 +87,6 @@ class SimulatedAnnealer:
     def score():
 
     def get_neighbor_func():
-    
 
     #グラフに対して、簡約化操作とそのノード一覧
     def get_action():
