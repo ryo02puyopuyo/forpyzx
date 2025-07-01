@@ -184,7 +184,10 @@ if __name__ == '__main__':
     print("--- 初期グラフ生成中 ---")
     c = generate_H_S_CNOT_T_circuit(8, 200, p_t=0.08, seed=1000)
     initial_graph = c.to_graph()
-    pyzx.simplify.full_reduce(initial_graph, quiet=True) # 初期グラフを簡略化
+    #pyzx.simplify.full_reduce(initial_graph, quiet=True) # 初期グラフを簡略化
+    pyzx.simplify.spider_simp(initial_graph)
+    pyzx.simplify.to_gh(initial_graph) #red node -> green
+    pyzx.simplify.id_simp(initial_graph)
     
     print("初期グラフが生成されました。")
     initial_score = score(initial_graph)
