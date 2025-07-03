@@ -188,7 +188,7 @@ if __name__ == '__main__':
     pyzx.simplify.spider_simp(initial_graph)
     pyzx.simplify.to_gh(initial_graph) #red node -> green
     pyzx.simplify.id_simp(initial_graph)
-    
+
     print("初期グラフが生成されました。")
     initial_score = score(initial_graph)
     
