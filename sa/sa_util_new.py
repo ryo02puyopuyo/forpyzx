@@ -22,7 +22,6 @@ import json
 import datetime
 import os
 
-# (ここにご提示の plot_graphs2, neighbor_unfusion, is_lc_vertex, ... , score_t, display_results までの全ての関数を貼り付け)
 def plot_graphs2(history):
     """
     実行履歴から2種類のグラフを描画する。
@@ -169,7 +168,7 @@ def get_neibor_with_rand_lc(g:BaseGraph,evaluate_func):
     else:
         try:
             a,b = get_candidate_of_neighbor_unfusion(g)
-            tmp_g = neighbor_unfusion(g,a,b)
+            tmp_g  =neighbor_unfusion(g,a,b)
             if pyzx.gflow.gflow(tmp_g):
                 next_state = tmp_g
         except ValueError:
@@ -179,7 +178,7 @@ def get_neibor_with_rand_lc(g:BaseGraph,evaluate_func):
 
     next_score = evaluate_func(next_state)
 
-    return next_state, next_score
+    return next_state, next_score 
 
 def get_gate_num(g:BaseGraph):
     g_tmp = g.copy()
@@ -187,12 +186,12 @@ def get_gate_num(g:BaseGraph):
     c = pyzx.optimize.phase_block_optimize(c)
     
     a = c.stats_dict()
-    dict = {}
-    dict["all"] = a["gates"]
-    dict["two"] = a["twoqubit"]
-    dict["one"] = a["gates"] - a["twoqubit"]
-    dict["t"] = a["tcount"]
-    return dict
+    dic = {}
+    dic["all"] = a["gates"]
+    dic["two"] = a["twoqubit"]
+    dic["one"] = a["gates"] - a["twoqubit"]
+    dic["t"] = a["tcount"]
+    return dic
 
 def get_node_and_edge_num(g:BaseGraph) -> Tuple[int, int]:
     a= g.num_vertices()
@@ -225,6 +224,7 @@ def display_results(initial_score, best_graph, best_score, score_history):
 
     print(f"最終的なTスコア: {final_t_score}")
     print(f"最終的なゲート数: {gate_stats}")
+
 
 class SimulatedAnnealer_T:
     """
@@ -286,8 +286,11 @@ class SimulatedAnnealer_T:
             loop_start = time.time()
             iteration_count += 1
 
+
             t0 = time.time()
             neighbor_state, neighbor_score = get_neibor_with_rand_lc(current_state,evaluate_func)
+            print(f"  get_neibor_with_rand_lc time: {tmp2 - tmp0:.4f} seconds")
+
             timings['get_neighbor'] += time.time() - t0
 
             t0 = time.time()
@@ -342,7 +345,7 @@ class SimulatedAnnealer_T:
 
         return best_state, best_score, history, timings, total_time
 
-# ★★★ ここからが追加・変更部分 ★★★
+# ★★★ ここからが変更された関数 ★★★
 
 def export_results_to_json(
     circuit_name: str,
@@ -352,13 +355,16 @@ def export_results_to_json(
     history: dict,
     initial_stats: dict,
     final_stats: dict,
-    best_graph: BaseGraph
+    best_graph: BaseGraph,
+    results_dir: str = "results",
+    graphs_dir: str = "graphs"
 ):
     """
-    指定された全ての項目を一つのJSONファイルにまとめて出力する。
+    指定された項目をJSONファイルに出力する。
+    結果のサマリーと最適化されたグラフは別々のファイル・ディレクトリに保存される。
 
     Args:
-        circuit_name (str): 最適化対象の回路名や説明。
+        circuit_name (str): 最適化対象の回路名。
         sa_params (dict): 焼きなまし法で使われたパラメータ。
         total_time (float): 総実行時間。
         timings (dict): 実行時間の内訳。
@@ -366,8 +372,18 @@ def export_results_to_json(
         initial_stats (dict): 最適化前の回路のゲート構成。
         final_stats (dict): 最適化後の回路のゲート構成。
         best_graph (BaseGraph): 最良解のグラフオブジェクト。
+        results_dir (str): 結果サマリーを保存するディレクトリ名。
+        graphs_dir (str): グラフオブジェクトを保存するディレクトリ名。
     """
-    # 出力するデータを一つの辞書にまとめる
+    # 出力ディレクトリが存在しない場合は作成
+    os.makedirs(results_dir, exist_ok=True)
+    os.makedirs(graphs_dir, exist_ok=True)
+
+    # タイムスタンプと回路名を含むベースファイル名を作成
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    base_filename = f"{circuit_name}_{timestamp}"
+
+    # --- 1. 結果サマリーのJSONファイルを出力 ---
     output_data = {
         'circuit_name': circuit_name,
         'sa_parameters': sa_params,
@@ -378,19 +394,26 @@ def export_results_to_json(
         'initial_circuit_stats': initial_stats,
         'optimized_circuit_stats': final_stats,
         'optimization_history': history,
-        # pyzxのグラフオブジェクトをJSON互換の辞書形式に変換して埋め込む
-        'best_graph_object': json.loads(best_graph.to_json())
     }
 
-    # ファイル名をタイムスタンプで生成
-    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"sa_result_{timestamp}.json"
+    # 結果ファイルのパスを構築
+    result_filename = f"sa_result_{base_filename}.json"
+    result_filepath = os.path.join(results_dir, result_filename)
 
     # JSONファイルに書き出す
-    with open(filename, 'w', encoding='utf-8') as f:
-        # indent=4で見やすくフォーマット、ensure_ascii=Falseで日本語の文字化けを防ぐ
+    with open(result_filepath, 'w', encoding='utf-8') as f:
         json.dump(output_data, f, indent=4, ensure_ascii=False)
+    
+    print(f"\n結果サマリーがJSONファイルとして保存されました: {result_filepath}")
 
-    print(f"\n結果がJSONファイルとして保存されました: {filename}")
 
+    # --- 2. 最良グラフのJSONファイルを出力 ---
+    # グラフファイルのパスを構築
+    graph_filename = f"best_graph_{base_filename}.json"
+    graph_filepath = os.path.join(graphs_dir, graph_filename)
+    
+    # グラフオブジェクトをJSON形式で書き出す
+    with open(graph_filepath, 'w', encoding='utf-8') as f:
+        f.write(best_graph.to_json())
 
+    print(f"最良グラフがJSONファイルとして保存されました: {graph_filepath}")
