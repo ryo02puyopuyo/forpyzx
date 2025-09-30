@@ -74,7 +74,7 @@ def neighbor_unfusion(g:BaseGraph,v1,v2,sign_flag=True):
     e1 = new_g.add_edge(new_g.edge(v1,new_v1),edgetype=EdgeType.HADAMARD)
     e2 = new_g.add_edge(new_g.edge(new_v1,new_v2),edgetype=EdgeType.HADAMARD)
     e3 = new_g.add_edge(new_g.edge(new_v2,v2),edgetype=EdgeType.HADAMARD)
-    pyzx.rules.apply_rule(new_g,lcomp,[[v1,list(new_g.neighbors(v1))]])
+    pyzx.rules.apply_rule(new_g,lcomp,[[v1,list(new_g.neighbors(v1))]],check_isolated_vertices=True)
 
     return new_g
 
@@ -139,13 +139,14 @@ def get_all_actions(g:BaseGraph):
     labeled_pv = [("pv", a) for a in pv]
     return labeled_lc + labeled_pv
 
-def get_neibor_with_rand_lc(g:BaseGraph,evaluate_func):
+def get_neibor_with_rand_lc(g:BaseGraph):
     next_state = copy.deepcopy(g)
     
     if random.uniform(0,1) <=0.8:
         actions = get_all_actions(next_state)
         if not actions: # 有効なアクションがない場合
-            return g, evaluate_func(g)
+            print("no action")
+            return g
         label, action = random.choice(actions)
         if label == "lc":
             pyzx.rules.apply_rule(
@@ -174,23 +175,19 @@ def get_neibor_with_rand_lc(g:BaseGraph,evaluate_func):
         except ValueError:
             # neighbor_unfusion の候補が見つからなかった場合は何もしない
             pass
-
-
-    next_score = evaluate_func(next_state)
-
-    return next_state, next_score 
+    return next_state
 
 def get_gate_num(g:BaseGraph):
     g_tmp = g.copy()
     c = pyzx.extract.extract_circuit(g_tmp,up_to_perm=True)
     c = pyzx.optimize.phase_block_optimize(c)
     
-    a = c.stats_dict()
+    stats = c.stats_dict()
     dic = {}
-    dic["all"] = a["gates"]
-    dic["two"] = a["twoqubit"]
-    dic["one"] = a["gates"] - a["twoqubit"]
-    dic["t"] = a["tcount"]
+    dic["all"] = stats["gates"]
+    dic["two"] = stats["twoqubit"]
+    dic["one"] = stats["gates"] - stats["twoqubit"]
+    dic["t"] = stats["tcount"]
     return dic
 
 def get_node_and_edge_num(g:BaseGraph) -> Tuple[int, int]:
@@ -198,32 +195,13 @@ def get_node_and_edge_num(g:BaseGraph) -> Tuple[int, int]:
     b = g.num_edges()
     return a,b
 
-def score_t(g:BaseGraph) -> int:
-    g_tmp = g.copy()
-    c = pyzx.extract.extract_circuit(g_tmp,up_to_perm=True)
-    c = pyzx.optimize.phase_block_optimize(c)
-    
-    return c.tcount()
-
-def display_results(initial_score, best_graph, best_score, score_history):
-    """
-    最適化の結果を表示し、パフォーマンスグラフを描画する。
-    """
+def display_results(initial_stats, best_graph, best_stats, score_history):
     print("\n--- 結果 ---")
-    print(f"初期スコア: {initial_score}")
-    print(f"最終的な最良スコア: {best_score}")
-
-    print("\n最適化後のグラフ:")
-    # pyzx.draw(best_graph, labels=True) # 環境によっては描画エラーになるためコメントアウト
-
+    ### <--- 変更点: 初期状態と最良状態の全ゲート数を表示 ---
+    print(f"初期ゲート数: T={initial_stats['t']}, 2-qubit={initial_stats['two']}, Total={initial_stats['all']}")
+    print(f"最終的な最良ゲート数: T={best_stats['t']}, 2-qubit={best_stats['two']}, Total={best_stats['all']}")
     print("\n--- パフォーマンスグラフ ---")
     plot_graphs2(score_history)
-
-    final_t_score = score_t(best_graph)
-    gate_stats = get_gate_num(best_graph)
-
-    print(f"最終的なTスコア: {final_t_score}")
-    print(f"最終的なゲート数: {gate_stats}")
 
 
 class SimulatedAnnealer_T:
@@ -246,32 +224,33 @@ class SimulatedAnnealer_T:
         delta_score = new_score - old_score
         return math.exp(-delta_score / temp)
     
-    def solve(self, initial_state, evaluate_func):
+    def solve(self, initial_state):
         total_start_time = time.time()
 
-        timings = {
-            'evaluate_func': 0.0,
-            'get_neighbor': 0.0,
-            'acceptance_probability': 0.0,
-            'state_update': 0.0,
-            'history_update': 0.0,
-            'print': 0.0,
-            'cooling': 0.0,
-            'loop_total': 0.0,
-        }
+        timings = {k: 0.0 for k in ['get_gate_num', 
+                                    'get_neighbor', 
+                                    'acceptance_probability', 
+                                    'state_update', 'history_update', 
+                                    'cooling', 
+                                    'loop_total']}
 
         current_temp = self.initial_temp
 
         t0 = time.time()
-        current_score = evaluate_func(initial_state)
-        timings['evaluate_func'] += time.time() - t0
-
+        initial_stats = get_gate_num(initial_state)
+        current_stats = initial_stats
         current_state = initial_state
+        timings['get_gate_num'] += time.time() - t0
+
         best_state = current_state
-        best_score = current_score
+        best_score = current_stats['t'] # スコアはTゲート数のみ
+        best_stats = current_stats # 最良状態の全ゲート情報も保持
 
         history = {
-            'score': [current_score],
+            'score': [current_stats['t']], # グラフ描画用のスコア
+            't_gates': [current_stats['t']],
+            'total_gates': [current_stats['all']],
+            'two_qubit_gates': [current_stats['two']],
             'time': [0.0],
             'transition_count': [0],
             'iteration_count': [0]
@@ -286,53 +265,54 @@ class SimulatedAnnealer_T:
             loop_start = time.time()
             iteration_count += 1
 
-
+            ### <--- 変更点: スコア計算を分離したため、グラフのみ受け取る ---
             t0 = time.time()
-            neighbor_state, neighbor_score = get_neibor_with_rand_lc(current_state,evaluate_func)
-            print(f"  get_neibor_with_rand_lc time: {tmp2 - tmp0:.4f} seconds")
-
+            neighbor_state = get_neibor_with_rand_lc(current_state)
             timings['get_neighbor'] += time.time() - t0
 
             t0 = time.time()
-            prob = self._acceptance_probability(current_score, neighbor_score, current_temp)
+            neighbor_stats = get_gate_num(neighbor_state)
+            timings['get_gate_num'] += time.time() - t0
+            
+            t0 = time.time()
+            prob = self._acceptance_probability(current_stats['t'], neighbor_stats['t'], current_temp)
             timings['acceptance_probability'] += time.time() - t0
 
             if random.random() < prob:
                 # 状態更新
                 t0 = time.time()
                 current_state = neighbor_state
-                current_score = neighbor_score
+                current_stats = neighbor_stats
                 transition_count += 1
                 timings['state_update'] += time.time() - t0
 
-                # 履歴更新
+                ### <--- 変更点: history に全ゲート数情報を追加して記録 ---
                 t0 = time.time()
                 elapsed_time = time.time() - total_start_time
-                history['score'].append(current_score)
+                history['score'].append(current_stats['t'])
+                history['t_gates'].append(current_stats['t'])
+                history['total_gates'].append(current_stats['all'])
+                history['two_qubit_gates'].append(current_stats['two'])
                 history['time'].append(elapsed_time)
                 history['transition_count'].append(transition_count)
                 history['iteration_count'].append(iteration_count)
                 timings['history_update'] += time.time() - t0
 
                 # 新しい最良スコアが見つかった場合のログ
-                if current_score < best_score:
+                if current_stats['t'] < best_score:
                     best_state = current_state
-                    best_score = current_score
+                    best_score = current_stats['t']
+                    best_stats = current_stats
                     t0 = time.time()
                     print(f"  T={current_temp:.4f}, iter={iteration_count}, 遷移回数={transition_count} -> 新しい最良スコア: {best_score}")
-                    timings['print'] += time.time() - t0
 
             # 冷却
             t0 = time.time()
             current_temp *= self.cooling_rate
             timings['cooling'] += time.time() - t0
 
-            # 100イテレーション毎に進捗表示
-            if iteration_count % 100 == 0:
-                t0 = time.time()
-                print(f"Iter: {iteration_count}, Temp: {current_temp:.4f}, Current Score: {current_score}, Best Score: {best_score}")
-                timings['print'] += time.time() - t0
-
+            print(f"Iter: {iteration_count}, Temp: {current_temp:.4f}, Current Score: {current_stats['t']}, Best Score: {best_score}")
+            t0 = time.time()
             timings['loop_total'] += time.time() - loop_start
 
         total_time = time.time() - total_start_time
@@ -343,7 +323,7 @@ class SimulatedAnnealer_T:
             print(f"{key:>25}: {val:.4f} 秒")
         print(f"{'total_time':>25}: {total_time:.4f} 秒")
 
-        return best_state, best_score, history, timings, total_time
+        return best_state, best_stats, history, timings, total_time, initial_stats
 
 # ★★★ ここからが変更された関数 ★★★
 
@@ -354,7 +334,7 @@ def export_results_to_json(
     timings: dict,
     history: dict,
     initial_stats: dict,
-    final_stats: dict,
+    best_stats: dict,
     best_graph: BaseGraph,
     results_dir: str = "results",
     graphs_dir: str = "graphs"
@@ -392,7 +372,7 @@ def export_results_to_json(
             'timing_breakdown_seconds': timings
         },
         'initial_circuit_stats': initial_stats,
-        'optimized_circuit_stats': final_stats,
+        'optimized_circuit_stats': best_stats,
         'optimization_history': history,
     }
 
